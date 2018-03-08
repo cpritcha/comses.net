@@ -136,7 +136,7 @@ class GeneralSearch:
 
     def __init__(self, indexed_models=None):
         if indexed_models is None:
-            indexed_models = [Codebase, Event, Job, MemberProfile, Page]
+            indexed_models = [Codebase, Event, Job, MemberProfile] + Page.__subclasses__()
         self._search = get_search_backend()
         self._models = indexed_models
 
@@ -161,15 +161,11 @@ class GeneralSearch:
         return functions
 
     def get_search_criteria(self, models, text, start, size):
+        criteria = [self.get_search_criteria_for_model(model, text).query.to_dict() for model in models]
         return {
             'query': {
-                'function_score': {
-                    'query': {
-                        'bool': {
-                            'should': [self.get_search_criteria_for_model(model, text).query.to_dict() for model in models]
-                        }
-                    },
-                    'functions': self.get_score_criteria(models)
+                'bool': {
+                    'should': criteria
                 }
             },
             'from': start,

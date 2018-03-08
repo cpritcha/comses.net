@@ -30,6 +30,14 @@ from core.queryset import TaggableSearch
 from .fields import MarkdownField
 
 
+def tag_names(self):
+    """Wagtail doesn't support multiple levels on index.RelatedFields
+    https://github.com/wagtail/wagtail/issues/3910
+
+    so this mixin is used flatten the related tags"""
+    return list(self.tags.values_list('name', flat=True))
+
+
 class ComsesGroups(Enum):
     ADMIN = "Admins"
     EDITOR = "Editors"
@@ -293,7 +301,7 @@ class PlatformTag(TaggedItemBase):
 
 
 @register_snippet
-class Platform(index.Indexed, ClusterableModel):
+class Platform(ClusterableModel):
     name = models.CharField(max_length=255)
     active = models.BooleanField(default=True)
     description = MarkdownField(max_length=512, blank=True)
@@ -320,18 +328,12 @@ class Platform(index.Indexed, ClusterableModel):
         FieldPanel('tags'),
     ]
 
+    @property
+    def tag_names(self):
+        return tag_names(self)
+
     def get_all_tags(self):
         return ' '.join(self.tags.all().values_list('name', flat=True))
-
-    search_fields = [
-        index.SearchField('name', partial_match=True),
-        index.SearchField('description', partial_match=True),
-        index.FilterField('active'),
-        index.FilterField('open_source'),
-        index.RelatedFields('tags', [
-            index.SearchField('name'),
-        ]),
-    ]
 
     def __str__(self):
         return self.name
@@ -433,8 +435,8 @@ class Event(index.Indexed, ClusterableModel):
         s = get_search_backend()
         doc_type = s.get_index_for_model(cls).mapping_class(cls).get_document_type()
         scores = [es.function.Linear(field, **{field: dict(scale='20d', offset='5d')}).to_dict() for field in
-                     ['date_created_filter', 'start_date_filter', 'submission_deadline_filter',
-                      'early_registration_deadline_filter']]
+                  ['date_created_filter', 'start_date_filter', 'submission_deadline_filter',
+                   'early_registration_deadline_filter']]
         for score in scores:
             score['filter'] = es.Q('type', value=doc_type).to_dict()
         return scores

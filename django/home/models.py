@@ -28,7 +28,7 @@ from wagtail.wagtailsnippets.edit_handlers import SnippetChooserPanel
 from wagtail.wagtailsnippets.models import register_snippet
 
 from core.fields import MarkdownField
-from core.models import MemberProfile, Platform, Event, Job
+from core.models import MemberProfile, Platform, Event, Job, tag_names
 from core.utils import get_canonical_image
 from home.forms import ContactForm
 from library.models import Codebase
@@ -431,7 +431,7 @@ class ContactPage(NavigationMixin, Page):
 
 class PlatformSnippetPlacement(Orderable, models.Model):
     page = ParentalKey('home.PlatformIndexPage', related_name='platform_placements')
-    platform = models.ForeignKey(Platform, related_name='+')
+    platform = models.ForeignKey(Platform, related_name='page_placements')
 
     class Meta:
         verbose_name = 'platform placement'
@@ -446,12 +446,24 @@ class PlatformSnippetPlacement(Orderable, models.Model):
 
 
 class PlatformIndexPage(NavigationMixin, Page):
+    platforms = models.ManyToManyField(to=Platform, through=PlatformSnippetPlacement, related_name='pages')
+
     template = 'home/resources/platforms.jinja'
     description = models.TextField(blank=True)
 
     content_panels = Page.content_panels + [
         FieldPanel('description'),
         InlinePanel('platform_placements', label='Platforms'),
+    ]
+
+    search_fields = Page.search_fields + [
+        index.RelatedFields('platforms', [
+            index.SearchField('name', boost=50),
+            index.SearchField('description'),
+            index.FilterField('active'),
+            index.FilterField('open_source'),
+            index.SearchField('tag_names')
+        ])
     ]
 
     def get_platforms(self):
@@ -470,7 +482,7 @@ class JournalTag(TaggedItemBase):
 
 
 @register_snippet
-class Journal(index.Indexed, ClusterableModel):
+class Journal(ClusterableModel):
     name = models.CharField(max_length=255)
     url = models.URLField()
     issn = models.CharField(max_length=16, blank=True, help_text=_("Linking ISSN-L for this Journal"))
@@ -485,14 +497,9 @@ class Journal(index.Indexed, ClusterableModel):
         FieldPanel('tags'),
     ]
 
-    search_fields = [
-        index.SearchField('name'),
-        index.SearchField('description'),
-        index.SearchField('issn'),
-        index.RelatedFields('tags', [
-            index.SearchField('name'),
-        ]),
-    ]
+    @property
+    def tag_names(self):
+        return tag_names(self)
 
     def __str__(self):
         return "{0} {1} {2}".format(self.name, self.url, self.issn)
@@ -508,6 +515,8 @@ class JournalSnippetPlacement(Orderable, models.Model):
 
 
 class JournalIndexPage(NavigationMixin, Page):
+    journals = models.ManyToManyField(to=Journal, through=JournalSnippetPlacement, related_name='pages')
+
     template = 'home/resources/journals.jinja'
     description = models.TextField(blank=True)
 
@@ -516,9 +525,17 @@ class JournalIndexPage(NavigationMixin, Page):
         InlinePanel('journal_placements', label='Journals'),
     ]
 
+    search_fields = Page.search_fields + [
+        index.RelatedFields('journals', [
+            index.SearchField('name'),
+            index.SearchField('description'),
+            index.SearchField('issn'),
+            index.SearchField('tag_names')
+        ])
+    ]
 
 @register_snippet
-class FaqEntry(index.Indexed, models.Model):
+class FaqEntry(models.Model):
     FAQ_CATEGORIES = Choices(
         ('abm', _('Agent-based Modeling Questions')),
         ('general', _('General CoMSES Net Questions')),
@@ -546,6 +563,7 @@ class FaqEntryPlacement(Orderable, models.Model):
 class FaqPage(Page, NavigationMixin):
     template = 'home/about/faq.jinja'
     description = models.CharField(max_length=1000)
+    faq_entries = models.ManyToManyField(to=FaqEntry, through=FaqEntryPlacement, related_name='faq_pages')
 
     def get_context(self, request, *args, **kwargs):
         context = super().get_context(request, *args, **kwargs)
@@ -560,8 +578,11 @@ class FaqPage(Page, NavigationMixin):
     ]
 
     search_fields = Page.search_fields + [
-        index.RelatedFields('faq_entry_placements', [
-            index.SearchField('faq_entry')
+        index.RelatedFields('faq_entries', [
+            index.FilterField('category'),
+            index.SearchField('question', boost=2),
+            index.SearchField('answer'),
+            index.FilterField('date_created')
         ])
     ]
 
