@@ -1,9 +1,12 @@
 from collections import defaultdict
 from typing import Dict
 
+import elasticsearch_dsl as es
 from wagtail.wagtailcore.models import Page
 from wagtail.wagtailsearch.backends import get_search_backend
 from django.apps import apps
+
+from core.queryset import TaggableSearch
 from .models import Event, Job, MemberProfile
 from library.models import Codebase
 import logging
@@ -142,26 +145,31 @@ class GeneralSearch:
             return model.elasticsearch_query(text)
         else:
             document_type = self._search.get_index_for_model(model).mapping_class(model).get_document_type()
-            return {
-                'bool': {
-                    'must': {
-                        'match': {
-                            '_all': text
-                        }
-                    },
-                    'filter': {
-                        'type': {
-                            'value': document_type
-                        }
-                    }
-                }
+            return TaggableSearch().using(self._search.es).query('bool',
+                                                                 must=[es.Q('match', _all=text)],
+                                                                 filter=[es.Q('type', value=document_type)])
+
+    def get_score_criteria(self, models):
+        functions = [
+            {
+                'weight': 1,
             }
+        ]
+        for model in models:
+            if hasattr(model, 'elasticsearch_score'):
+                functions += model.elasticsearch_score()
+        return functions
 
     def get_search_criteria(self, models, text, start, size):
         return {
             'query': {
-                'bool': {
-                    'should': [self.get_search_criteria_for_model(model, text) for model in models]
+                'function_score': {
+                    'query': {
+                        'bool': {
+                            'should': [self.get_search_criteria_for_model(model, text).query.to_dict() for model in models]
+                        }
+                    },
+                    'functions': self.get_score_criteria(models)
                 }
             },
             'from': start,

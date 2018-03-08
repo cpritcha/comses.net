@@ -1,4 +1,5 @@
 import pathlib
+import elasticsearch_dsl as es
 from enum import Enum
 
 from allauth.account.models import EmailAddress
@@ -22,8 +23,10 @@ from wagtail.wagtailadmin.edit_handlers import FieldPanel
 from wagtail.wagtailimages.edit_handlers import ImageChooserPanel
 from wagtail.wagtailimages.models import Image
 from wagtail.wagtailsearch import index
+from wagtail.wagtailsearch.backends import get_search_backend
 from wagtail.wagtailsnippets.models import register_snippet
 
+from core.queryset import TaggableSearch
 from .fields import MarkdownField
 
 
@@ -106,7 +109,6 @@ class FollowUser(models.Model):
 
 
 class MemberProfileQuerySet(models.QuerySet):
-
     EXCLUDED_USERS = ('AnonymousUser', 'openabm')
 
     def find_by_name(self, query):
@@ -243,6 +245,14 @@ class MemberProfile(index.Indexed, ClusterableModel):
 
     def get_degrees_for_indexing(self):
         return ' '.join(self.degrees)
+
+    @classmethod
+    def elasticsearch_query(cls, text):
+        s = get_search_backend()
+        doc_type = s.get_index_for_model(cls).mapping_class(cls).get_document_type()
+        return TaggableSearch().using(s.es).query('bool',
+                                                  must=[es.Q('match', _all=text)],
+                                                  filter=[es.Q('type', value=doc_type)])
 
     def __str__(self):
         return str(self.user)
@@ -392,6 +402,7 @@ class Event(index.Indexed, ClusterableModel):
     search_fields = [
         index.SearchField('title', partial_match=True, boost=10),
         index.SearchField('description', partial_match=True),
+        index.FilterField('date_created'),
         index.FilterField('start_date'),
         index.FilterField('submission_deadline'),
         index.FilterField('early_registration_deadline'),
@@ -416,6 +427,26 @@ class Event(index.Indexed, ClusterableModel):
     @classmethod
     def get_list_url(cls):
         return reverse('home:event-list')
+
+    @classmethod
+    def elasticsearch_score(cls):
+        s = get_search_backend()
+        doc_type = s.get_index_for_model(cls).mapping_class(cls).get_document_type()
+        scores = [es.function.Linear(field, **{field: dict(scale='20d', offset='5d')}).to_dict() for field in
+                     ['date_created_filter', 'start_date_filter', 'submission_deadline_filter',
+                      'early_registration_deadline_filter']]
+        for score in scores:
+            score['filter'] = es.Q('type', value=doc_type).to_dict()
+        return scores
+
+    @classmethod
+    def elasticsearch_query(cls, text):
+        s = get_search_backend()
+        doc_type = s.get_index_for_model(cls).mapping_class(cls).get_document_type()
+        return TaggableSearch() \
+            .query(es.Q('bool',
+                        must=[es.Q('match', _all=text)],
+                        filter=[es.Q('type', value=doc_type)]))
 
     def __str__(self):
         return "{0} posted by {1} on {2}".format(
@@ -444,7 +475,8 @@ class JobQuerySet(models.QuerySet):
 class Job(index.Indexed, ClusterableModel):
     title = models.CharField(max_length=300, help_text=_('Job posting title'))
     date_created = models.DateTimeField(default=timezone.now)
-    application_deadline = models.DateField(blank=True, null=True, help_text=_('Optional deadline for applications'))
+    application_deadline = models.DateField(blank=True, null=True,
+                                            help_text=_('Optional deadline for applications'))
     last_modified = models.DateTimeField(auto_now=True)
     summary = models.CharField(max_length=500, blank=True, help_text=_('Brief summary of job posting.'))
     description = MarkdownField()
@@ -480,6 +512,25 @@ class Job(index.Indexed, ClusterableModel):
     @classmethod
     def get_list_url(cls):
         return reverse('home:job-list')
+
+    @classmethod
+    def elasticsearch_score(cls):
+        s = get_search_backend()
+        doc_type = s.get_index_for_model(cls).mapping_class(cls).get_document_type()
+        score = es.function.Gauss('-date_created_filter',
+                                  date_created_filter=dict(scale='20d', offset='10d')).to_dict()
+        score['filter'] = es.Q('type', value=doc_type).to_dict()
+        return [score]
+
+    @classmethod
+    def elasticsearch_query(cls, text):
+        s = get_search_backend()
+        doc_type = s.get_index_for_model(cls).mapping_class(cls).get_document_type()
+        return TaggableSearch().using(s.es) \
+            .query(es.Q('bool',
+                        must=[es.Q('match', _all=text)],
+                        filter=[es.Q('type',
+                                     value=doc_type)]))
 
     def __str__(self):
         return "{0} posted by {1} on {2}".format(

@@ -3,6 +3,7 @@ import mimetypes
 import pathlib
 import uuid
 
+import elasticsearch_dsl as es
 import os
 import semver
 from django.conf import settings
@@ -34,6 +35,7 @@ from core import fs
 from core.backends import get_viewable_objects_for_user
 from core.fields import MarkdownField
 from core.models import Platform
+from core.queryset import TaggableSearch
 from library.fs import CodebaseReleaseFsApi, StagingDirectories, FileCategoryDirectories, MessageLevels
 
 logger = logging.getLogger(__name__)
@@ -572,34 +574,13 @@ class Codebase(index.Indexed, ClusterableModel):
 
     @classmethod
     def elasticsearch_query(cls, text):
-        document_type = get_search_backend().get_index_for_model(cls).mapping_class(cls).get_document_type()
-        return {
-            "bool": {
-                "must": [
-                    {
-                        "match": {
-                            "_all": text
-                        }
-                    }
-                ],
-                "filter": {
-                    "bool": {
-                        "must": [
-                            {
-                                "term": {
-                                    "live_filter": True
-                                }
-                            },
-                            {
-                                "type": {
-                                    "value": document_type
-                                }
-                            }
-                        ]
-                    }
-                }
-            }
-        }
+        s = get_search_backend()
+        document_type = s.get_index_for_model(cls).mapping_class(cls).get_document_type()
+        return TaggableSearch().query('bool',
+                                      must=[es.Q('match', _all=text)],
+                                      filter=es.Q('bool',
+                                                  must=[es.Q('term', live_filter=True),
+                                                        es.Q('type', value=document_type)]))
 
     def __str__(self):
         live = repr(self.live) if hasattr(self, 'live') else 'Unknown'
