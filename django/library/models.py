@@ -34,7 +34,7 @@ from wagtail.wagtailsearch.backends import get_search_backend
 from core import fs
 from core.backends import get_viewable_objects_for_user
 from core.fields import MarkdownField
-from core.models import Platform
+from core.models import Platform, tag_names, IMPORTANT_DATE_SEARCH_FIELDS
 from core.queryset import TaggableSearch
 from library.fs import CodebaseReleaseFsApi, StagingDirectories, FileCategoryDirectories, MessageLevels
 
@@ -322,7 +322,7 @@ class Codebase(index.Indexed, ClusterableModel):
 
     objects = CodebaseQuerySet.as_manager()
 
-    search_fields = [
+    search_fields = IMPORTANT_DATE_SEARCH_FIELDS + [
         index.SearchField('title', partial_match=True, boost=10),
         index.SearchField('description', partial_match=True),
         index.FilterField('peer_reviewed'),
@@ -331,15 +331,21 @@ class Codebase(index.Indexed, ClusterableModel):
         index.FilterField('live'),
         index.FilterField('first_published_at'),
         index.FilterField('last_published_on'),
-        index.RelatedFields('tags', [
-            index.SearchField('name'),
-        ]),
+        index.SearchField('tag_names'),
         index.SearchField('get_all_contributors_search_fields'),
         index.SearchField('references_text', partial_match=True),
         index.SearchField('associated_publication_text', partial_match=True),
     ]
 
     HAS_PUBLISHED_KEY = True
+
+    @property
+    def tag_names(self):
+        return tag_names(self)
+
+    @property
+    def important_dates(self):
+        return []
 
     @property
     def deletable(self):
@@ -678,7 +684,7 @@ class CodebaseReleaseQuerySet(models.QuerySet):
         return get_viewable_objects_for_user(user, queryset=self)
 
 
-class CodebaseRelease(index.Indexed, ClusterableModel):
+class CodebaseRelease(ClusterableModel):
     """
     A snapshot of a codebase at a particular moment in time, versioned and addressable in a git repo behind-the-scenes
     and a bagit repository.
@@ -755,7 +761,7 @@ class CodebaseRelease(index.Indexed, ClusterableModel):
         index.FilterField('flagged'),
         index.RelatedFields('platforms', [
             index.SearchField('name'),
-            index.SearchField('get_all_tags'),
+            index.SearchField('tag_names'),
         ]),
         index.RelatedFields('contributors', [
             index.SearchField('get_aggregated_search_fields'),

@@ -16,19 +16,16 @@ from modelcluster.fields import ParentalKey
 from modelcluster.models import ClusterableModel
 from taggit.managers import TaggableManager
 from taggit.models import TaggedItemBase
-from wagtail.wagtailadmin.edit_handlers import (FieldPanel, InlinePanel, PageChooserPanel, MultiFieldPanel,
-                                                StreamFieldPanel)
-from wagtail.wagtailcore import blocks
-from wagtail.wagtailcore.fields import RichTextField, StreamField
+from wagtail.wagtailadmin.edit_handlers import (FieldPanel, InlinePanel, PageChooserPanel, MultiFieldPanel,)
+from wagtail.wagtailcore.fields import RichTextField
 from wagtail.wagtailcore.models import Page, Orderable
-from wagtail.wagtailimages.blocks import ImageChooserBlock
 from wagtail.wagtailimages.edit_handlers import ImageChooserPanel
 from wagtail.wagtailsearch import index
 from wagtail.wagtailsnippets.edit_handlers import SnippetChooserPanel
 from wagtail.wagtailsnippets.models import register_snippet
 
 from core.fields import MarkdownField
-from core.models import MemberProfile, Platform, Event, Job, tag_names
+from core.models import MemberProfile, Platform, Event, Job, tag_names, IMPORTANT_DATE_SEARCH_FIELDS
 from core.utils import get_canonical_image
 from home.forms import ContactForm
 from library.models import Codebase
@@ -358,28 +355,13 @@ class CategoryIndexPage(NavigationMixin, Page):
         InlinePanel('navigation_links', label=_('Subnavigation Links')),
     ]
 
-    search_fields = Page.search_fields + [
+    search_fields = Page.search_fields + IMPORTANT_DATE_SEARCH_FIELDS + [
         index.SearchField('summary')
     ]
 
-
-class StreamPage(Page, NavigationMixin):
-    template = models.CharField(max_length=128, default='home/stream_page.jinja')
-    date = models.DateField("Post date", default=timezone.now)
-    description = models.CharField(max_length=512, blank=True)
-
-    body = StreamField([
-        ('heading', blocks.CharBlock(classname='full title')),
-        ('paragraph', blocks.RichTextBlock()),
-        ('image', ImageChooserBlock()),
-        ('url', blocks.URLBlock(required=False))
-    ])
-
-    content_panels = Page.content_panels + [
-        FieldPanel('date'),
-        FieldPanel('description'),
-        StreamFieldPanel('body'),
-    ]
+    @property
+    def important_dates(self):
+        return []
 
 
 class MarkdownPage(NavigationMixin, Page):
@@ -399,11 +381,15 @@ class MarkdownPage(NavigationMixin, Page):
         FieldPanel('body'),
     ]
 
-    search_fields = Page.search_fields + [
+    search_fields = Page.search_fields + IMPORTANT_DATE_SEARCH_FIELDS + [
         index.SearchField('date'),
         index.SearchField('description'),
         index.SearchField('body')
     ]
+
+    @property
+    def important_dates(self):
+        return []
 
 
 class ContactPage(NavigationMixin, Page):
@@ -456,7 +442,7 @@ class PlatformIndexPage(NavigationMixin, Page):
         InlinePanel('platform_placements', label='Platforms'),
     ]
 
-    search_fields = Page.search_fields + [
+    search_fields = Page.search_fields + IMPORTANT_DATE_SEARCH_FIELDS + [
         index.RelatedFields('platforms', [
             index.SearchField('name', boost=50),
             index.SearchField('description'),
@@ -465,6 +451,10 @@ class PlatformIndexPage(NavigationMixin, Page):
             index.SearchField('tag_names')
         ])
     ]
+
+    @property
+    def important_dates(self):
+        return []
 
     def get_platforms(self):
         # highlight featured platforms? allow the community to rank them.
@@ -534,6 +524,11 @@ class JournalIndexPage(NavigationMixin, Page):
         ])
     ]
 
+    @property
+    def important_dates(self):
+        return []
+
+
 @register_snippet
 class FaqEntry(models.Model):
     FAQ_CATEGORIES = Choices(
@@ -577,7 +572,7 @@ class FaqPage(Page, NavigationMixin):
         InlinePanel('faq_entry_placements', label='FAQ Entries')
     ]
 
-    search_fields = Page.search_fields + [
+    search_fields = Page.search_fields + IMPORTANT_DATE_SEARCH_FIELDS + [
         index.RelatedFields('faq_entries', [
             index.FilterField('category'),
             index.SearchField('question', boost=2),
@@ -585,6 +580,10 @@ class FaqPage(Page, NavigationMixin):
             index.FilterField('date_created')
         ])
     ]
+
+    @property
+    def important_dates(self):
+        return []
 
 
 class PeopleEntryPlacement(Orderable, models.Model):
@@ -634,6 +633,12 @@ class PeoplePage(Page, NavigationMixin):
 
 
 class NewsIndexPage(Page):
+    search_fields = Page.search_fields + IMPORTANT_DATE_SEARCH_FIELDS
+
+    @property
+    def important_dates(self):
+        return []
+
     def get_context(self, request):
         context = super(NewsIndexPage, self).get_context(request)
         context['news_entries'] = NewsPage.objects.child_of(self).live()
@@ -651,7 +656,7 @@ class NewsPage(Page):
         related_name='+'
     )
 
-    search_fields = Page.search_fields + [
+    search_fields = Page.search_fields + IMPORTANT_DATE_SEARCH_FIELDS + [
         index.SearchField('body'),
         index.FilterField('date')
     ]
@@ -671,6 +676,10 @@ class NewsPage(Page):
     # Parent page / subpage type rules
     parent_page_types = ['home.NewsIndexPage']
     subpage_types = []
+
+    @property
+    def important_dates(self):
+        return []
 
 
 class NewsPageRelatedLink(Orderable):

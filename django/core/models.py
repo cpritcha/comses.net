@@ -22,7 +22,7 @@ from wagtail.contrib.settings.registry import register_setting
 from wagtail.wagtailadmin.edit_handlers import FieldPanel
 from wagtail.wagtailimages.edit_handlers import ImageChooserPanel
 from wagtail.wagtailimages.models import Image
-from wagtail.wagtailsearch import index
+from core.elasticsearch import index
 from wagtail.wagtailsearch.backends import get_search_backend
 from wagtail.wagtailsnippets.models import register_snippet
 
@@ -36,6 +36,11 @@ def tag_names(self):
 
     so this mixin is used flatten the related tags"""
     return list(self.tags.values_list('name', flat=True))
+
+
+IMPORTANT_DATE_SEARCH_FIELDS = [
+    index.PrefixOptionalFilterField('important_dates', should_prefix=False, type=models.DateTimeField().get_internal_type())
+]
 
 
 class ComsesGroups(Enum):
@@ -173,9 +178,45 @@ class MemberProfile(index.Indexed, ClusterableModel):
 
     objects = MemberProfileQuerySet.as_manager()
 
+    panels = [
+        FieldPanel('bio', widget=forms.Textarea),
+        FieldPanel('research_interests', widget=forms.Textarea),
+        FieldPanel('personal_url'),
+        FieldPanel('professional_url'),
+        FieldPanel('institution'),
+        ImageChooserPanel('picture'),
+        FieldPanel('tags'),
+    ]
+
+    search_fields = IMPORTANT_DATE_SEARCH_FIELDS + [
+        index.SearchField('bio', partial_match=True, boost=5),
+        index.SearchField('research_interests', partial_match=True, boost=5),
+        index.FilterField('is_active'),
+        index.FilterField('username'),
+        index.SearchField('get_degrees_for_indexing', partial_match=True),
+        index.SearchField('name', partial_match=True, boost=5),
+        index.RelatedFields('institution', [
+            index.SearchField('name', partial_match=True),
+        ]),
+        index.SearchField('tag_names'),
+        index.RelatedFields('user', [
+            index.SearchField('first_name', partial_match=True),
+            index.SearchField('last_name', partial_match=True, boost=3),
+            index.SearchField('email', partial_match=True, boost=3)
+        ]),
+    ]
+
     """
     Returns the ORCID profile URL associated with this member profile if it exists, or None
     """
+
+    @property
+    def important_dates(self):
+        return []
+
+    @property
+    def tag_names(self):
+        return tag_names(self)
 
     @property
     def orcid_url(self):
@@ -264,36 +305,6 @@ class MemberProfile(index.Indexed, ClusterableModel):
 
     def __str__(self):
         return str(self.user)
-
-    panels = [
-        FieldPanel('bio', widget=forms.Textarea),
-        FieldPanel('research_interests', widget=forms.Textarea),
-        FieldPanel('personal_url'),
-        FieldPanel('professional_url'),
-        FieldPanel('institution'),
-        ImageChooserPanel('picture'),
-        FieldPanel('tags'),
-    ]
-
-    search_fields = [
-        index.SearchField('bio', partial_match=True, boost=5),
-        index.SearchField('research_interests', partial_match=True, boost=5),
-        index.FilterField('is_active'),
-        index.FilterField('username'),
-        index.SearchField('get_degrees_for_indexing', partial_match=True),
-        index.SearchField('name', partial_match=True, boost=5),
-        index.RelatedFields('institution', [
-            index.SearchField('name', partial_match=True),
-        ]),
-        index.RelatedFields('tags', [
-            index.SearchField('name', partial_match=True),
-        ]),
-        index.RelatedFields('user', [
-            index.SearchField('first_name', partial_match=True),
-            index.SearchField('last_name', partial_match=True, boost=3),
-            index.SearchField('email', partial_match=True, boost=3)
-        ]),
-    ]
 
 
 class PlatformTag(TaggedItemBase):
@@ -408,6 +419,7 @@ class Event(index.Indexed, ClusterableModel):
         index.FilterField('start_date'),
         index.FilterField('submission_deadline'),
         index.FilterField('early_registration_deadline'),
+        index.FilterField('important_dates', type=models.DateTimeField().get_internal_type()),
         index.SearchField('location', partial_match=True),
         index.RelatedFields('tags', [
             index.SearchField('name'),
@@ -420,6 +432,11 @@ class Event(index.Indexed, ClusterableModel):
     ]
 
     @property
+    def important_dates(self):
+        dates = [self.date_created, self.submission_deadline, self.early_registration_deadline, self.start_date]
+        return [d for d in dates if d is not None]
+
+    @property
     def live(self):
         return True
 
@@ -429,17 +446,6 @@ class Event(index.Indexed, ClusterableModel):
     @classmethod
     def get_list_url(cls):
         return reverse('home:event-list')
-
-    @classmethod
-    def elasticsearch_score(cls):
-        s = get_search_backend()
-        doc_type = s.get_index_for_model(cls).mapping_class(cls).get_document_type()
-        scores = [es.function.Linear(field, **{field: dict(scale='20d', offset='5d')}).to_dict() for field in
-                  ['date_created_filter', 'start_date_filter', 'submission_deadline_filter',
-                   'early_registration_deadline_filter']]
-        for score in scores:
-            score['filter'] = es.Q('type', value=doc_type).to_dict()
-        return scores
 
     @classmethod
     def elasticsearch_query(cls, text):
@@ -494,6 +500,7 @@ class Job(index.Indexed, ClusterableModel):
         index.SearchField('description', partial_match=True),
         index.FilterField('date_created'),
         index.FilterField('application_deadline'),
+        index.FilterField('important_dates', type=models.DateTimeField().get_internal_type()),
         index.RelatedFields('tags', [
             index.SearchField('name'),
         ]),
@@ -507,6 +514,10 @@ class Job(index.Indexed, ClusterableModel):
     @property
     def live(self):
         return True
+
+    @property
+    def important_dates(self):
+        return [d for d in [self.date_created, self.application_deadline] if d is not None]
 
     def get_absolute_url(self):
         return reverse('home:job-detail', kwargs={'pk': self.pk})

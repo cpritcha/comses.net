@@ -132,7 +132,7 @@ ROOT_URLCONF = 'core.urls'
 # configure elasticsearch 5 wagtail backend
 WAGTAILSEARCH_BACKENDS = {
     'default': {
-        'BACKEND': 'wagtail.wagtailsearch.backends.elasticsearch5',
+        'BACKEND': 'core.elasticsearch.backend',
         'URLS': ['http://elasticsearch:9200'],
         'INDEX': 'wagtail',
         # 'ATOMIC_REBUILD': True,

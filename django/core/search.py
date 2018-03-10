@@ -42,7 +42,13 @@ class BaseSearchResult:
 
     @staticmethod
     def get_tags(result):
-        return result['_source']['tags']
+        source = result['_source']
+        if 'tags' in source:
+            return [{'name': t} for t in source['tags']]
+        elif 'tag_names' in source:
+            return source['tag_names']
+        else:
+            raise KeyError("'tags' or 'tag_names' key does not exist")
 
     @staticmethod
     def get_title(result):
@@ -136,9 +142,10 @@ class GeneralSearch:
 
     def __init__(self, indexed_models=None):
         if indexed_models is None:
-            indexed_models = [Codebase, Event, Job, MemberProfile] + Page.__subclasses__()
-        self._search = get_search_backend()
-        self._models = indexed_models
+            indexed_models = [Codebase, Event, Job, MemberProfile] + [p for p in Page.__subclasses__() if
+                                                                      hasattr(p, 'important_dates')]
+            self._search = get_search_backend()
+            self._models = indexed_models
 
     def get_search_criteria_for_model(self, model, text):
         if hasattr(model, 'elasticsearch_query'):
@@ -149,28 +156,46 @@ class GeneralSearch:
                                                                  must=[es.Q('match', _all=text)],
                                                                  filter=[es.Q('type', value=document_type)])
 
-    def get_score_criteria(self, models):
-        functions = [
+    def get_score_criteria(self):
+        return [
             {
-                'weight': 1,
+                'script_score': {
+                    'script': '1'
+                }
+            },
+            {
+                'filter': {
+                    'exists': {
+                        'field': 'important_dates_filter'
+                    }
+                },
+                'linear': {
+                    'important_dates_filter': {
+                        'scale': '20d',
+                        'offset': '5d'
+                    }
+                }
             }
         ]
-        for model in models:
-            if hasattr(model, 'elasticsearch_score'):
-                functions += model.elasticsearch_score()
-        return functions
 
     def get_search_criteria(self, models, text, start, size):
         criteria = [self.get_search_criteria_for_model(model, text).query.to_dict() for model in models]
-        return {
+        query = {
             'query': {
-                'bool': {
-                    'should': criteria
+                'function_score': {
+                    'query': {
+                        'bool': {
+                            'should': criteria
+                        }
+                    },
+                    'functions': self.get_score_criteria(),
+                    'score_mode': 'sum'
                 }
             },
             'from': start,
             'size': size
         }
+        return query
 
     def get_index_names(self, models):
         return [self._search.get_index_for_model(m).name for m in models]
