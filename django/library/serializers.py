@@ -356,10 +356,24 @@ class PeerReviewFeedbackEditorSerializer(serializers.ModelSerializer):
                             'is_runnable', 'runnable_comments')
 
 
+class PeerReviewReviewerSerializer(serializers.ModelSerializer):
+    tags = TagSerializer(many=True)
+
+    # annotated fields
+    n_pending_reviews = serializers.IntegerField()
+    n_total_reviews = serializers.IntegerField()
+
+    class Meta:
+        model = MemberProfile
+        fields = ('id', 'avatar_url', 'degrees', 'name', 'n_pending_reviews', 'n_total_reviews', 'tags',)
+
+
 class PeerReviewInvitationSerializer(serializers.ModelSerializer):
     """Serialize review invitations. Build for list, detail and create routes
     (updating a peer review invitation may not make sense since an email has
     already been sent)"""
+
+    candidate_reviewer = PeerReviewReviewerSerializer(read_only=True)
 
     class Meta:
         model = PeerReviewInvitation
